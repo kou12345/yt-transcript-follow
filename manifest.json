@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Transcript Follow",
+  "version": "0.1.0",
+  "description": "YouTube の再生位置に合わせて Obsidian ノートの文字起こしをサイドパネルで自動スクロールする",
+  "permissions": ["sidePanel"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "文字起こしを開く" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "content_scripts": [{ "matches": ["https://www.youtube.com/*"], "js": ["content.js"] }]
+}

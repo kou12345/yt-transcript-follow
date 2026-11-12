@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Transcript Follow</title>
+<style>
+  :root { --bg: #fff; --fg: #1f2328; --muted: #6e7781; --accent: #d1242f; --active: #fff4d6; --border: #d0d7de; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1e1e1e; --fg: #e6e6e6; --muted: #9a9a9a; --accent: #ff6b6b; --active: #3a3222; --border: #3a3a3a; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.7 system-ui, sans-serif; }
+  header { position: sticky; top: 0; display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+  #status { flex: 1; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { font: inherit; font-size: 12px; cursor: pointer; }
+  #list { padding: 0 12px 50vh; }
+  h3 { margin: 24px 0 8px; font-size: 15px; }
+  .seg { padding: 6px 8px; margin: 0 -8px; border-radius: 6px; cursor: pointer; }
+  .seg.active { background: var(--active); }
+  .time { color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .seg p { margin: 2px 0; }
+  .seg p.en { color: var(--muted); font-size: 13px; }
+  #follow { position: fixed; right: 12px; bottom: 12px; padding: 6px 12px; border-radius: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <span id="status">YouTube の動画を開いてください</span>
+  <button id="grant" hidden></button>
+  <button id="pick">Vault を選択</button>
+</header>
+<div id="list"></div>
+<button id="follow" hidden>現在位置に戻る</button>
+<script src="sidepanel.js"></script>
+</body>
+</html>
