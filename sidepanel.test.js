@@ -1,6 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parse, hashSegment, normalizeKey, findAllOccurrences, resolvePairSpans, sliceLineSpans } = require('./sidepanel.js');
+const {
+  parse,
+  hashSegment,
+  normalizeKey,
+  parseKnownWords,
+  serializeKnownWords,
+  findAllOccurrences,
+  resolvePairSpans,
+  sliceLineSpans,
+} = require('./sidepanel.js');
 
 test('hashSegment matches Python FNV-1a 32-bit hash over UTF-8', () => {
   const ja = '当時ロンドンに拠点を置いていたのは好都合でした。🔥';
@@ -12,6 +21,14 @@ test('normalizeKey prefers lemma and falls back to lowercased en', () => {
   assert.equal(normalizeKey({ en: 'Launched', lemma: 'launch' }), 'launch');
   assert.equal(normalizeKey({ en: 'Take Advantage Of' }), 'take advantage of');
   assert.equal(normalizeKey({ en: 'worries', lemma: '  Worry ' }), 'worry');
+});
+
+test('parseKnownWords and serializeKnownWords round-trip and normalize', () => {
+  const raw = serializeKnownWords(new Set(['worry', 'compete', 'despite']));
+  assert.deepEqual([...parseKnownWords(raw)], ['compete', 'despite', 'worry']);
+  assert.deepEqual([...parseKnownWords('["Launch", " launch ", ""]')], ['launch']);
+  assert.equal(parseKnownWords('not json'), null);
+  assert.equal(parseKnownWords('{}'), null);
 });
 
 test('parse unescapes markdown and preserves duplicate timestamps', () => {

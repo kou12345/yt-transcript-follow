@@ -18,6 +18,25 @@ function normalizeKey(pair) {
   return raw.trim().toLowerCase();
 }
 
+function parseKnownWords(raw) {
+  try {
+    const data = JSON.parse(raw);
+    const list = Array.isArray(data) ? data : Array.isArray(data?.words) ? data.words : null;
+    if (!list) return null;
+    const out = new Set();
+    for (const item of list) {
+      if (typeof item === 'string' && item.trim()) out.add(item.trim().toLowerCase());
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function serializeKnownWords(words) {
+  return `${JSON.stringify({ version: 1, words: [...words].sort() }, null, 2)}\n`;
+}
+
 function parse(md) {
   const start = md.indexOf('\n## Transcript');
   const items = [];
@@ -109,9 +128,9 @@ if (typeof document !== 'undefined') {
 
   let vault = null, videoId = null, tabId = null, segments = [], active = -1, follow = true, lastTime = null;
   let hoveredSeg = null, hoveredPair = null, alignMode = 'ruby';
-  let knownWords = new Set(), lastMarked = null, toastTimer = null;
+  let knownWords = new Set(), lastMarked = null, toastTimer = null, writeChain = Promise.resolve();
 
-  // FileSystemDirectoryHandle や既知語リストは IndexedDB に保存して次回以降も使い回す
+  // FileSystemDirectoryHandle と既知語フォールバックは IndexedDB に保存する
   const db = new Promise((resolve) => {
     const req = indexedDB.open('transcript-follow', 1);
     req.onupgradeneeded = () => req.result.createObjectStore('kv');
@@ -186,40 +205,81 @@ if (typeof document !== 'undefined') {
     }));
   }
 
-  async function persistKnown() {
-    renderKnownPanel();
-    await idb('knownWords', [...knownWords].sort());
+  async function loadKnownFromVault(dir) {
+    try {
+      const alignDir = await dir.getDirectoryHandle('.yt-transcript-follow');
+      const fileHandle = await alignDir.getFileHandle('known-words.json');
+      return parseKnownWords(await (await fileHandle.getFile()).text());
+    } catch {
+      return null;
+    }
   }
 
-  function showToast(key) {
+  async function ensureWritePermission(dir) {
+    if (!dir) return false;
+    if (await dir.queryPermission({ mode: 'readwrite' }) === 'granted') return true;
+    try {
+      return (await dir.requestPermission({ mode: 'readwrite' })) === 'granted';
+    } catch {
+      return false;
+    }
+  }
+
+  function enqueueVaultKnownWrite(dir, payload) {
+    const run = async () => {
+      const alignDir = await dir.getDirectoryHandle('.yt-transcript-follow', { create: true });
+      const fileHandle = await alignDir.getFileHandle('known-words.json', { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(payload);
+      await writable.close();
+      return true;
+    };
+    const next = writeChain.then(run, run);
+    writeChain = next.catch(() => false);
+    return next.catch(() => false);
+  }
+
+  async function persistKnown() {
+    renderKnownPanel();
+    const sorted = [...knownWords].sort();
+    const payload = serializeKnownWords(knownWords);
+    const writable = await ensureWritePermission(vault);
+    await idb('knownWords', sorted);
+    if (!writable) return false;
+    return enqueueVaultKnownWrite(vault, payload);
+  }
+
+  function showToast(key, savedToVault) {
     lastMarked = key;
-    toastMsg.textContent = `「${key}」を覚えた登録`;
+    toastMsg.textContent = savedToVault
+      ? `「${key}」を覚えた登録`
+      : `「${key}」を覚えた登録（ブラウザのみ）`;
     toastEl.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { toastEl.hidden = true; }, 5000);
   }
 
-  function markKnown(key) {
+  async function markKnown(key) {
     if (!key || knownWords.has(key)) return;
     knownWords.add(key);
     clearHover();
     syncKnownDom();
-    persistKnown();
-    showToast(key);
+    const savedToVault = await persistKnown();
+    showToast(key, savedToVault);
   }
 
-  function unmarkKnown(key) {
+  async function unmarkKnown(key) {
     if (!knownWords.delete(key)) return;
     syncKnownDom();
-    persistKnown();
+    await persistKnown();
   }
 
   knownBtn.onclick = () => { knownPanel.hidden = !knownPanel.hidden; };
-  knownClear.onclick = () => {
+  knownClear.onclick = async () => {
     knownWords.clear();
     toastEl.hidden = true;
     syncKnownDom();
-    persistKnown();
+    await persistKnown();
   };
   undoBtn.onclick = () => {
     if (lastMarked) unmarkKnown(lastMarked);
@@ -287,7 +347,7 @@ if (typeof document !== 'undefined') {
       ruby.append(text.slice(s.start, s.end));
       const rt = document.createElement('rt');
       rt.textContent = s.en;
-      rt.title = `クリックで「${s.key}」を覚えた登録（以降の動画でも非表示）`;
+      rt.title = `クリックで「${s.key}」を覚えた登録（Vault に保存・以降の動画でも非表示）`;
       ruby.append(rt);
       p.append(ruby);
       cursor = s.end;
@@ -386,6 +446,17 @@ if (typeof document !== 'undefined') {
     return alignedCount > 0;
   }
 
+  async function syncKnownFromVault(dir) {
+    const vaultKnown = await loadKnownFromVault(dir);
+    if (vaultKnown) {
+      knownWords = vaultKnown;
+      renderKnownPanel();
+      await idb('knownWords', [...knownWords].sort());
+    } else if (knownWords.size > 0 && await dir.queryPermission({ mode: 'readwrite' }) === 'granted') {
+      await enqueueVaultKnownWrite(dir, serializeKnownWords(knownWords));
+    }
+  }
+
   async function load() {
     list.replaceChildren();
     alignBtn.hidden = true;
@@ -397,7 +468,11 @@ if (typeof document !== 'undefined') {
     }
     const id = videoId;
     statusEl.textContent = 'ノートを検索中…';
-    const [file, alignment] = await Promise.all([findNote(vault, id), loadAlignment(vault, id)]);
+    const [file, alignment] = await Promise.all([
+      findNote(vault, id),
+      loadAlignment(vault, id),
+      syncKnownFromVault(vault),
+    ]);
     if (id !== videoId) return;
     if (!file) {
       statusEl.textContent = `source が ${id} のノートが見つかりません`;
@@ -432,14 +507,16 @@ if (typeof document !== 'undefined') {
     vault = handle;
     grantBtn.hidden = true;
     await idb('vault', handle);
+    await syncKnownFromVault(handle);
     load();
   }
 
-  $('#pick').onclick = async () => useVault(await showDirectoryPicker());
+  $('#pick').onclick = async () => useVault(await showDirectoryPicker({ mode: 'readwrite' }));
 
   grantBtn.onclick = async () => {
     const handle = await idb('vault');
-    if (await handle.requestPermission({ mode: 'read' }) === 'granted') useVault(handle);
+    if (await handle.requestPermission({ mode: 'readwrite' }) === 'granted') useVault(handle);
+    else if (await handle.requestPermission({ mode: 'read' }) === 'granted') useVault(handle);
   };
 
   chrome.runtime.onMessage.addListener((msg, sender) => {
@@ -458,12 +535,26 @@ if (typeof document !== 'undefined') {
     if (Array.isArray(savedKnown)) knownWords = new Set(savedKnown);
     renderKnownPanel();
     if (!handle) return;
-    if (await handle.queryPermission({ mode: 'read' }) === 'granted') return useVault(handle);
+    if (
+      await handle.queryPermission({ mode: 'readwrite' }) === 'granted' ||
+      await handle.queryPermission({ mode: 'read' }) === 'granted'
+    ) {
+      return useVault(handle);
+    }
     grantBtn.textContent = `「${handle.name}」に再接続`;
     grantBtn.hidden = false;
   })();
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { parse, hashSegment, normalizeKey, findAllOccurrences, resolvePairSpans, sliceLineSpans };
+  module.exports = {
+    parse,
+    hashSegment,
+    normalizeKey,
+    parseKnownWords,
+    serializeKnownWords,
+    findAllOccurrences,
+    resolvePairSpans,
+    sliceLineSpans,
+  };
 }
