@@ -1,7 +1,6 @@
 const JA_RE = /[\u3040-\u30ff\u4e00-\u9fff]/;
-const ALIGN_COLORS = 6;
-const ALIGN_MODES = ['active', 'hover', 'off'];
-const ALIGN_LABELS = { active: '対応: 色分け', hover: '対応: ホバー', off: '対応: OFF' };
+const ALIGN_MODES = ['ruby', 'active', 'off'];
+const ALIGN_LABELS = { ruby: 'ルビ: 常時', active: 'ルビ: 再生中', off: 'ルビ: OFF' };
 const textEncoder = new TextEncoder();
 
 // Python 側 (generate_alignments.py) と同一の FNV-1a 32bit ハッシュ
@@ -12,6 +11,11 @@ function hashSegment(ja, en) {
     h = Math.imul(h, 0x01000193) >>> 0;
   }
   return h.toString(16).padStart(8, '0');
+}
+
+function normalizeKey(pair) {
+  const raw = typeof pair?.lemma === 'string' && pair.lemma.trim() ? pair.lemma : pair?.en || '';
+  return raw.trim().toLowerCase();
 }
 
 function parse(md) {
@@ -69,9 +73,9 @@ function resolvePairSpans(jaText, enText, pairs) {
     const [js, je] = jaOccs[jaIdx];
     if (overlaps(es, ee, enSpans) || overlaps(js, je, jaSpans)) continue;
 
-    const color = pairId % ALIGN_COLORS;
-    enSpans.push({ start: es, end: ee, pairId, color });
-    jaSpans.push({ start: js, end: je, pairId, color });
+    const key = normalizeKey(pair);
+    enSpans.push({ start: es, end: ee, pairId, key, en: pair.en });
+    jaSpans.push({ start: js, end: je, pairId, key, en: pair.en });
     pairId++;
   }
 
@@ -89,7 +93,8 @@ function sliceLineSpans(spans, lineStart, lineEnd) {
       start: Math.max(span.start, lineStart) - lineStart,
       end: Math.min(span.end, lineEnd) - lineStart,
       pairId: span.pairId,
-      color: span.color,
+      key: span.key,
+      en: span.en,
     });
   }
   return out;
@@ -97,11 +102,16 @@ function sliceLineSpans(spans, lineStart, lineEnd) {
 
 if (typeof document !== 'undefined') {
   const $ = (s) => document.querySelector(s);
-  const statusEl = $('#status'), list = $('#list'), followBtn = $('#follow'), grantBtn = $('#grant'), alignBtn = $('#align');
-  let vault = null, videoId = null, tabId = null, segments = [], active = -1, follow = true, lastTime = null;
-  let hoveredSeg = null, hoveredPair = null, alignMode = 'active';
+  const statusEl = $('#status'), list = $('#list'), followBtn = $('#follow'), grantBtn = $('#grant');
+  const alignBtn = $('#align'), knownBtn = $('#known-btn'), knownPanel = $('#known-panel');
+  const knownList = $('#known-list'), knownClear = $('#known-clear');
+  const toastEl = $('#toast'), toastMsg = $('#toast-msg'), undoBtn = $('#undo');
 
-  // FileSystemDirectoryHandle は IndexedDB に保存できるので、Vault の選択を次回以降も使い回す
+  let vault = null, videoId = null, tabId = null, segments = [], active = -1, follow = true, lastTime = null;
+  let hoveredSeg = null, hoveredPair = null, alignMode = 'ruby';
+  let knownWords = new Set(), lastMarked = null, toastTimer = null;
+
+  // FileSystemDirectoryHandle や既知語リストは IndexedDB に保存して次回以降も使い回す
   const db = new Promise((resolve) => {
     const req = indexedDB.open('transcript-follow', 1);
     req.onupgradeneeded = () => req.result.createObjectStore('kv');
@@ -117,8 +127,7 @@ if (typeof document !== 'undefined') {
 
   function clearHover() {
     if (!hoveredSeg) return;
-    hoveredSeg.classList.remove('has-hover');
-    for (const el of hoveredSeg.querySelectorAll('.tok.match')) el.classList.remove('match');
+    for (const el of hoveredSeg.querySelectorAll('.match')) el.classList.remove('match');
     hoveredSeg = null;
     hoveredPair = null;
   }
@@ -128,36 +137,107 @@ if (typeof document !== 'undefined') {
     clearHover();
     hoveredSeg = seg;
     hoveredPair = pairId;
-    seg.classList.add('has-hover');
-    for (const el of seg.querySelectorAll(`.tok[data-pair="${pairId}"]`)) el.classList.add('match');
+    for (const el of seg.querySelectorAll(`[data-pair="${pairId}"]`)) {
+      if (!el.classList.contains('known')) el.classList.add('match');
+    }
   }
 
   function setAlignMode(mode) {
-    alignMode = ALIGN_MODES.includes(mode) ? mode : 'active';
+    alignMode = ALIGN_MODES.includes(mode) ? mode : 'ruby';
     document.body.dataset.align = alignMode;
     alignBtn.textContent = ALIGN_LABELS[alignMode];
     if (alignMode === 'off') clearHover();
     try { localStorage.setItem('alignMode', alignMode); } catch {}
   }
 
-  try { setAlignMode(localStorage.getItem('alignMode') || 'active'); } catch { setAlignMode('active'); }
+  try { setAlignMode(localStorage.getItem('alignMode') || 'ruby'); } catch { setAlignMode('ruby'); }
 
   alignBtn.onclick = () => {
     const next = ALIGN_MODES[(ALIGN_MODES.indexOf(alignMode) + 1) % ALIGN_MODES.length];
     setAlignMode(next);
   };
 
+  function syncKnownDom() {
+    for (const el of list.querySelectorAll('.vocab, .tok')) {
+      el.classList.toggle('known', knownWords.has(el.dataset.key));
+    }
+    for (const p of list.querySelectorAll('.seg p:not(.en)')) {
+      p.classList.toggle('has-ruby', Boolean(p.querySelector('ruby.vocab:not(.known)')));
+    }
+  }
+
+  function renderKnownPanel() {
+    const words = [...knownWords].sort();
+    knownBtn.hidden = words.length === 0;
+    knownBtn.textContent = `既知(${words.length})`;
+    if (words.length === 0) {
+      knownPanel.hidden = true;
+      knownList.replaceChildren();
+      return;
+    }
+    knownList.replaceChildren(...words.map((w) => {
+      const chip = document.createElement('button');
+      chip.className = 'chip';
+      chip.type = 'button';
+      chip.textContent = `${w} ×`;
+      chip.title = `「${w}」のルビを再表示`;
+      chip.onclick = () => unmarkKnown(w);
+      return chip;
+    }));
+  }
+
+  async function persistKnown() {
+    renderKnownPanel();
+    await idb('knownWords', [...knownWords].sort());
+  }
+
+  function showToast(key) {
+    lastMarked = key;
+    toastMsg.textContent = `「${key}」を覚えた登録`;
+    toastEl.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.hidden = true; }, 5000);
+  }
+
+  function markKnown(key) {
+    if (!key || knownWords.has(key)) return;
+    knownWords.add(key);
+    clearHover();
+    syncKnownDom();
+    persistKnown();
+    showToast(key);
+  }
+
+  function unmarkKnown(key) {
+    if (!knownWords.delete(key)) return;
+    syncKnownDom();
+    persistKnown();
+  }
+
+  knownBtn.onclick = () => { knownPanel.hidden = !knownPanel.hidden; };
+  knownClear.onclick = () => {
+    knownWords.clear();
+    toastEl.hidden = true;
+    syncKnownDom();
+    persistKnown();
+  };
+  undoBtn.onclick = () => {
+    if (lastMarked) unmarkKnown(lastMarked);
+    lastMarked = null;
+    toastEl.hidden = true;
+  };
+
   list.addEventListener('pointerover', (e) => {
     if (alignMode === 'off') return;
-    const tok = e.target.closest?.('.tok');
-    if (!tok) return;
-    const seg = tok.closest('.seg');
-    if (seg) setHover(seg, tok.dataset.pair);
+    const hit = e.target.closest?.('.vocab, .tok');
+    if (!hit || hit.classList.contains('known')) return;
+    const seg = hit.closest('.seg');
+    if (seg) setHover(seg, hit.dataset.pair);
   });
   list.addEventListener('pointerout', (e) => {
-    const tok = e.target.closest?.('.tok');
-    if (!tok) return;
-    const next = e.relatedTarget?.closest?.('.tok');
+    const hit = e.target.closest?.('.vocab, .tok');
+    if (!hit) return;
+    const next = e.relatedTarget?.closest?.('.vocab, .tok');
     if (next && next.closest('.seg') === hoveredSeg && next.dataset.pair === hoveredPair) return;
     clearHover();
   });
@@ -188,7 +268,35 @@ if (typeof document !== 'undefined') {
     }
   }
 
-  function appendAlignedText(p, text, spans) {
+  function appendJaRuby(p, text, spans) {
+    if (!spans.length) {
+      p.textContent = text;
+      return;
+    }
+    let cursor = 0;
+    let visibleRuby = false;
+    for (const s of spans) {
+      if (s.start > cursor) p.append(text.slice(cursor, s.start));
+      const ruby = document.createElement('ruby');
+      ruby.className = 'vocab';
+      ruby.dataset.pair = String(s.pairId);
+      ruby.dataset.key = s.key;
+      const isKnown = knownWords.has(s.key);
+      if (isKnown) ruby.classList.add('known');
+      else visibleRuby = true;
+      ruby.append(text.slice(s.start, s.end));
+      const rt = document.createElement('rt');
+      rt.textContent = s.en;
+      rt.title = `クリックで「${s.key}」を覚えた登録（以降の動画でも非表示）`;
+      ruby.append(rt);
+      p.append(ruby);
+      cursor = s.end;
+    }
+    if (cursor < text.length) p.append(text.slice(cursor));
+    if (visibleRuby) p.classList.add('has-ruby');
+  }
+
+  function appendEnTokens(p, text, spans) {
     if (!spans.length) {
       p.textContent = text;
       return;
@@ -199,7 +307,8 @@ if (typeof document !== 'undefined') {
       const tok = document.createElement('span');
       tok.className = 'tok';
       tok.dataset.pair = String(s.pairId);
-      tok.dataset.color = String(s.color);
+      tok.dataset.key = s.key;
+      if (knownWords.has(s.key)) tok.classList.add('known');
       tok.textContent = text.slice(s.start, s.end);
       p.append(tok);
       cursor = s.end;
@@ -252,13 +361,22 @@ if (typeof document !== 'undefined') {
 
       el.append(time, ...lineEntries.map((line) => {
         const p = document.createElement('p');
-        if (!line.isJa) p.className = 'en';
-        const spans = sliceLineSpans(line.isJa ? jaSpans : enSpans, line.start, line.end);
-        appendAlignedText(p, line.text, spans);
+        if (line.isJa) {
+          appendJaRuby(p, line.text, sliceLineSpans(jaSpans, line.start, line.end));
+        } else {
+          p.className = 'en';
+          appendEnTokens(p, line.text, sliceLineSpans(enSpans, line.start, line.end));
+        }
         return p;
       }));
 
-      el.onclick = () => {
+      el.onclick = (e) => {
+        const rt = e.target.closest?.('rt');
+        const hit = e.target.closest?.('.vocab, .tok');
+        if (rt || (e.shiftKey && hit)) {
+          if (hit && !hit.classList.contains('known')) markKnown(hit.dataset.key);
+          return;
+        }
         chrome.tabs.sendMessage(tabId, { type: 'seek', time: item.time });
         setFollow(true);
       };
@@ -336,7 +454,9 @@ if (typeof document !== 'undefined') {
   });
 
   (async () => {
-    const handle = await idb('vault');
+    const [savedKnown, handle] = await Promise.all([idb('knownWords'), idb('vault')]);
+    if (Array.isArray(savedKnown)) knownWords = new Set(savedKnown);
+    renderKnownPanel();
     if (!handle) return;
     if (await handle.queryPermission({ mode: 'read' }) === 'granted') return useVault(handle);
     grantBtn.textContent = `「${handle.name}」に再接続`;
@@ -345,5 +465,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { parse, hashSegment, findAllOccurrences, resolvePairSpans, sliceLineSpans };
+  module.exports = { parse, hashSegment, normalizeKey, findAllOccurrences, resolvePairSpans, sliceLineSpans };
 }

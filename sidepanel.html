@@ -6,28 +6,23 @@
 <style>
   :root {
     --bg: #fff; --fg: #1f2328; --muted: #6e7781; --accent: #d1242f; --active: #fff4d6; --border: #d0d7de;
-    --c0: #2563eb; --c0-bg: rgba(37, 99, 235, 0.18);
-    --c1: #0d9488; --c1-bg: rgba(13, 148, 136, 0.18);
-    --c2: #7c3aed; --c2-bg: rgba(124, 58, 237, 0.18);
-    --c3: #db2777; --c3-bg: rgba(219, 39, 119, 0.18);
-    --c4: #ea580c; --c4-bg: rgba(234, 88, 12, 0.18);
-    --c5: #16a34a; --c5-bg: rgba(22, 163, 74, 0.18);
+    --ruby: #3b5bdb; --ruby-bg: rgba(59, 91, 219, 0.14); --panel: #f6f8fa;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #1e1e1e; --fg: #e6e6e6; --muted: #9a9a9a; --accent: #ff6b6b; --active: #3a3222; --border: #3a3a3a;
-      --c0: #60a5fa; --c0-bg: rgba(96, 165, 250, 0.28);
-      --c1: #2dd4bf; --c1-bg: rgba(45, 212, 191, 0.26);
-      --c2: #c084fc; --c2-bg: rgba(192, 132, 252, 0.28);
-      --c3: #f472b6; --c3-bg: rgba(244, 114, 182, 0.28);
-      --c4: #fb923c; --c4-bg: rgba(251, 146, 60, 0.28);
-      --c5: #4ade80; --c5-bg: rgba(74, 222, 128, 0.26);
+      --ruby: #8ab4f8; --ruby-bg: rgba(138, 180, 248, 0.22); --panel: #262626;
     }
   }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.7 system-ui, sans-serif; }
-  header { position: sticky; top: 0; z-index: 1; display: flex; gap: 6px; align-items: center; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+  header { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; align-items: center; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
   #status { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button { font: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+  #known-panel { position: sticky; top: 41px; z-index: 1; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border); max-height: 36vh; overflow: auto; }
+  .known-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+  #known-list { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 11px; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
   #list { padding: 0 12px 50vh; }
   h3 { margin: 24px 0 8px; font-size: 15px; }
   .seg { padding: 6px 8px; margin: 0 -8px; border-radius: 6px; cursor: pointer; }
@@ -35,27 +30,41 @@
   .time { color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; }
   .seg p { margin: 2px 0; }
   .seg p.en { color: var(--muted); font-size: 13px; }
-  .tok { border-radius: 3px; border-bottom: 2px solid transparent; padding-bottom: 1px; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-color 0.1s ease, border-color 0.1s ease, opacity 0.1s ease; }
-  .tok[data-color="0"] { --tok-color: var(--c0); --tok-bg: var(--c0-bg); }
-  .tok[data-color="1"] { --tok-color: var(--c1); --tok-bg: var(--c1-bg); }
-  .tok[data-color="2"] { --tok-color: var(--c2); --tok-bg: var(--c2-bg); }
-  .tok[data-color="3"] { --tok-color: var(--c3); --tok-bg: var(--c3-bg); }
-  .tok[data-color="4"] { --tok-color: var(--c4); --tok-bg: var(--c4-bg); }
-  .tok[data-color="5"] { --tok-color: var(--c5); --tok-bg: var(--c5-bg); }
-  body[data-align="active"] .seg.active .tok { border-bottom-color: var(--tok-color); }
-  body[data-align="active"] .seg.active.has-hover .tok:not(.match) { opacity: 0.45; }
-  body:not([data-align="off"]) .seg .tok.match { background: var(--tok-bg); border-bottom-color: var(--tok-color); color: var(--fg); opacity: 1; }
-  #follow { position: fixed; right: 12px; bottom: 12px; padding: 6px 12px; border-radius: 16px; }
+  body[data-align="ruby"] .seg p.has-ruby,
+  body[data-align="active"] .seg.active p.has-ruby { line-height: 2.2; }
+  ruby.vocab { ruby-position: over; border-radius: 3px; transition: background-color 0.1s ease; }
+  ruby.vocab rt { font-size: 10px; line-height: 1.1; font-weight: 500; color: var(--ruby); user-select: none; cursor: pointer; padding: 0 2px; border-radius: 3px; transition: opacity 0.12s ease, background-color 0.12s ease; }
+  body[data-align="ruby"] .seg:not(.active) ruby.vocab rt { opacity: 0.72; }
+  body[data-align="ruby"] .seg.active ruby.vocab rt,
+  body[data-align="active"] .seg.active ruby.vocab rt { opacity: 1; }
+  ruby.vocab rt:hover { background: var(--ruby-bg); text-decoration: line-through; opacity: 1; }
+  ruby.vocab.known rt,
+  body[data-align="active"] .seg:not(.active) ruby.vocab rt,
+  body[data-align="off"] ruby.vocab rt { display: none; }
+  .tok { border-radius: 3px; transition: background-color 0.1s ease, color 0.1s ease; }
+  body:not([data-align="off"]) .seg .match { background: var(--ruby-bg); color: var(--fg); }
+  #toast { position: fixed; left: 12px; bottom: 12px; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); font-size: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+  #toast[hidden] { display: none; }
+  #follow { position: fixed; right: 12px; bottom: 12px; z-index: 3; padding: 6px 12px; border-radius: 16px; }
 </style>
 </head>
-<body data-align="active">
+<body data-align="ruby">
 <header>
   <span id="status">YouTube の動画を開いてください</span>
-  <button id="align" hidden title="日英単語の対応表示を切替">対応: 色分け</button>
+  <button id="align" hidden title="英語ルビ表示を切替">ルビ: 常時</button>
+  <button id="known-btn" hidden title="覚えた単語（非表示リスト）を管理"></button>
   <button id="grant" hidden></button>
   <button id="pick">Vault を選択</button>
 </header>
+<div id="known-panel" hidden>
+  <div class="known-head">
+    <span>覚えた単語（クリックでルビを再表示）</span>
+    <button id="known-clear">すべて解除</button>
+  </div>
+  <div id="known-list"></div>
+</div>
 <div id="list"></div>
+<div id="toast" hidden><span id="toast-msg"></span><button id="undo">元に戻す</button></div>
 <button id="follow" hidden>現在位置に戻る</button>
 <script src="sidepanel.js"></script>
 </body>
