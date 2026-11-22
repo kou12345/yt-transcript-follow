@@ -32,8 +32,9 @@
   .seg p.en { color: var(--muted); font-size: 13px; }
   body[data-align="ruby"] .seg p.has-ruby,
   body[data-align="active"] .seg.active p.has-ruby { line-height: 2.2; }
-  ruby.vocab { ruby-position: over; border-radius: 3px; transition: background-color 0.1s ease; }
-  ruby.vocab rt { font-size: 10px; line-height: 1.1; font-weight: 500; color: var(--ruby); user-select: none; cursor: pointer; padding: 0 2px; border-radius: 3px; transition: opacity 0.12s ease, background-color 0.12s ease; }
+  ruby.vocab { ruby-position: over; ruby-align: center; border-radius: 3px; transition: background-color 0.1s ease; }
+  ruby.vocab.nowrap { white-space: nowrap; }
+  ruby.vocab rt { font-size: 10px; line-height: 1.1; font-weight: 500; letter-spacing: -0.01em; color: var(--ruby); user-select: none; cursor: pointer; padding: 0 2px; border-radius: 3px; transition: opacity 0.12s ease, background-color 0.12s ease; }
   body[data-align="ruby"] .seg:not(.active) ruby.vocab rt { opacity: 0.72; }
   body[data-align="ruby"] .seg.active ruby.vocab rt,
   body[data-align="active"] .seg.active ruby.vocab rt { opacity: 1; }

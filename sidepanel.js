@@ -337,14 +337,15 @@ if (typeof document !== 'undefined') {
     let visibleRuby = false;
     for (const s of spans) {
       if (s.start > cursor) p.append(text.slice(cursor, s.start));
+      const jaSpanText = text.slice(s.start, s.end);
       const ruby = document.createElement('ruby');
-      ruby.className = 'vocab';
+      ruby.className = jaSpanText.length <= 10 ? 'vocab nowrap' : 'vocab';
       ruby.dataset.pair = String(s.pairId);
       ruby.dataset.key = s.key;
       const isKnown = knownWords.has(s.key);
       if (isKnown) ruby.classList.add('known');
       else visibleRuby = true;
-      ruby.append(text.slice(s.start, s.end));
+      ruby.append(jaSpanText);
       const rt = document.createElement('rt');
       rt.textContent = s.en;
       rt.title = `クリックで「${s.key}」を覚えた登録（Vault に保存・以降の動画でも非表示）`;
