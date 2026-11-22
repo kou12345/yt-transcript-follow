@@ -4,14 +4,30 @@
 <meta charset="utf-8">
 <title>Transcript Follow</title>
 <style>
-  :root { --bg: #fff; --fg: #1f2328; --muted: #6e7781; --accent: #d1242f; --active: #fff4d6; --border: #d0d7de; }
+  :root {
+    --bg: #fff; --fg: #1f2328; --muted: #6e7781; --accent: #d1242f; --active: #fff4d6; --border: #d0d7de;
+    --c0: #2563eb; --c0-bg: rgba(37, 99, 235, 0.18);
+    --c1: #0d9488; --c1-bg: rgba(13, 148, 136, 0.18);
+    --c2: #7c3aed; --c2-bg: rgba(124, 58, 237, 0.18);
+    --c3: #db2777; --c3-bg: rgba(219, 39, 119, 0.18);
+    --c4: #ea580c; --c4-bg: rgba(234, 88, 12, 0.18);
+    --c5: #16a34a; --c5-bg: rgba(22, 163, 74, 0.18);
+  }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #1e1e1e; --fg: #e6e6e6; --muted: #9a9a9a; --accent: #ff6b6b; --active: #3a3222; --border: #3a3a3a; }
+    :root {
+      --bg: #1e1e1e; --fg: #e6e6e6; --muted: #9a9a9a; --accent: #ff6b6b; --active: #3a3222; --border: #3a3a3a;
+      --c0: #60a5fa; --c0-bg: rgba(96, 165, 250, 0.28);
+      --c1: #2dd4bf; --c1-bg: rgba(45, 212, 191, 0.26);
+      --c2: #c084fc; --c2-bg: rgba(192, 132, 252, 0.28);
+      --c3: #f472b6; --c3-bg: rgba(244, 114, 182, 0.28);
+      --c4: #fb923c; --c4-bg: rgba(251, 146, 60, 0.28);
+      --c5: #4ade80; --c5-bg: rgba(74, 222, 128, 0.26);
+    }
   }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.7 system-ui, sans-serif; }
-  header { position: sticky; top: 0; display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
-  #status { flex: 1; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  button { font: inherit; font-size: 12px; cursor: pointer; }
+  header { position: sticky; top: 0; z-index: 1; display: flex; gap: 6px; align-items: center; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+  #status { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { font: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
   #list { padding: 0 12px 50vh; }
   h3 { margin: 24px 0 8px; font-size: 15px; }
   .seg { padding: 6px 8px; margin: 0 -8px; border-radius: 6px; cursor: pointer; }
@@ -19,12 +35,23 @@
   .time { color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; }
   .seg p { margin: 2px 0; }
   .seg p.en { color: var(--muted); font-size: 13px; }
+  .tok { border-radius: 3px; border-bottom: 2px solid transparent; padding-bottom: 1px; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-color 0.1s ease, border-color 0.1s ease, opacity 0.1s ease; }
+  .tok[data-color="0"] { --tok-color: var(--c0); --tok-bg: var(--c0-bg); }
+  .tok[data-color="1"] { --tok-color: var(--c1); --tok-bg: var(--c1-bg); }
+  .tok[data-color="2"] { --tok-color: var(--c2); --tok-bg: var(--c2-bg); }
+  .tok[data-color="3"] { --tok-color: var(--c3); --tok-bg: var(--c3-bg); }
+  .tok[data-color="4"] { --tok-color: var(--c4); --tok-bg: var(--c4-bg); }
+  .tok[data-color="5"] { --tok-color: var(--c5); --tok-bg: var(--c5-bg); }
+  body[data-align="active"] .seg.active .tok { border-bottom-color: var(--tok-color); }
+  body[data-align="active"] .seg.active.has-hover .tok:not(.match) { opacity: 0.45; }
+  body:not([data-align="off"]) .seg .tok.match { background: var(--tok-bg); border-bottom-color: var(--tok-color); color: var(--fg); opacity: 1; }
   #follow { position: fixed; right: 12px; bottom: 12px; padding: 6px 12px; border-radius: 16px; }
 </style>
 </head>
-<body>
+<body data-align="active">
 <header>
   <span id="status">YouTube の動画を開いてください</span>
+  <button id="align" hidden title="日英単語の対応表示を切替">対応: 色分け</button>
   <button id="grant" hidden></button>
   <button id="pick">Vault を選択</button>
 </header>
